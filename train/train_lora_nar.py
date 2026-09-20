@@ -106,7 +106,8 @@ def flow_step(model, sample, device, base_seed, grad_checkpoint=False,
     T = sample.frames
     z = sample.z.to(device)
     noise = torch.randn(T, 64, dtype=torch.bfloat16, device=device, generator=generator)
-    t = torch.rand((), generator=torch.Generator(device="cpu")).item()
+    t = torch.rand((), generator=torch.Generator(device="cpu")
+                   .manual_seed(base_seed + 1)).item()
     raw = torch.logit(torch.tensor(t, dtype=torch.float64)).clamp(-20, 20).item()
     x_t = t * noise + (1 - t) * z
     target = noise - z
@@ -130,11 +131,6 @@ def flow_step(model, sample, device, base_seed, grad_checkpoint=False,
     return shape_w * F.mse_loss(pred_n, target_n) + (1.0 - shape_w) * mag
 
 
-def change_requires_grad(x, requires_grad):
-    x = x.detach().requires_grad_(requires_grad)
-    return x
-
-
 def checkpointed_velocity(model, caches, cos, sin, pos_emb, x_t, raw):
     device, dtype = x_t.device, x_t.dtype
     T = x_t.shape[0]
@@ -144,22 +140,21 @@ def checkpointed_velocity(model, caches, cos, sin, pos_emb, x_t, raw):
     x = model.vae2llm(x_nar[None])
     x = x + model.time_embedder(shifted.expand(nar_length))[None]
     x = x + pos_emb
-    for layer, (ar_k, ar_v) in zip(model.model.layers, caches):
-        k_cache, v_cache = ar_k, ar_v
+    def run_layer(x, layer, k_cache, v_cache, cos, sin):
+        from yue2 import nar as nar_mod
+        q, k, v = layer.nar_self_attn.project_qkv(
+            layer.nar_input_layernorm(x), cos, sin)
+        k = torch.cat((k_cache, k[0]))
+        v = torch.cat((v_cache, v[0]))
+        h = nar_mod.attention(q[0], k, v)
+        x = x + layer.nar_self_attn.o_proj(h.flatten(1)[None])
+        return x + layer.nar_mlp(layer.nar_pre_mlp_layernorm(x))
 
-        def run_layer(x, layer, k_cache, v_cache, cos, sin):
-            from yue2 import nar as nar_mod
-            q, k, v = layer.nar_self_attn.project_qkv(
-                layer.nar_input_layernorm(x), cos, sin)
-            k = torch.cat((k_cache, k[0]))
-            v = torch.cat((v_cache, v[0]))
-            h = nar_mod.attention(q[0], k, v)
-            x = x + layer.nar_self_attn.o_proj(h.flatten(1)[None])
-            return x + layer.nar_mlp(layer.nar_pre_mlp_layernorm(x))
-
-        x = checkpoint.checkpoint(run_layer, change_requires_grad(x, True),
-                                  layer, k_cache, v_cache, cos, sin,
-                                  use_reentrant=False)
+    for layer, (k_cache, v_cache) in zip(model.model.layers, caches):
+        # No detach here: with use_reentrant=False the graph stays connected
+        # between layers, so every layer's LoRA receives gradients.
+        x = checkpoint.checkpoint(run_layer, x, layer, k_cache, v_cache,
+                                  cos, sin, use_reentrant=False)
     return model.llm2vae(model.model.norm(x))[0, 1:-1]
 
 

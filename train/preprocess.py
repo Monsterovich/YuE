@@ -183,7 +183,7 @@ def main():
             need = frames * DOWNSAMPLE
             if audio_key in latent_cache:
                 cached_lat = latent_cache[audio_key]
-                audio_len = cached_lat.shape[-1]
+                audio_len = cached_lat.shape[-1] * DOWNSAMPLE  # frames -> samples
                 if audio_len < need:
                     frames = audio_len // DOWNSAMPLE
                     if frames < 1:

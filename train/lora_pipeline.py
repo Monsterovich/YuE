@@ -22,18 +22,18 @@ from lora import (LoRALinear, adapter_hyperparameters, attach_ar_lora,
                   attach_nar_lora, load_adapter)
 
 
-def set_lora_scale(model, multiplier):
-    """Scale every attached LoRA's contribution by ``multiplier``.
+def set_lora_scale(modules, multiplier):
+    """Scale the contribution of the given LoRALinear ``modules`` by ``multiplier``.
 
     LoRA's effective strength is ``alpha / r`` baked into the ``lora_scale``
     buffer; re-multiplying that buffer shifts the adapter intensity without
-    re-training. ``None``/``1.0`` keeps the trained strength as-is.
+    re-training. Pass only the modules of one adapter so that AR and NAR
+    scales stay independent. ``None``/``1.0`` keeps the trained strength.
     """
     if multiplier is None:
         return
-    for module in model.modules():
-        if isinstance(module, LoRALinear):
-            module.lora_scale.data.mul_(module.lora_scale.new_tensor(float(multiplier)))
+    for module in modules:
+        module.lora_scale.data.mul_(module.lora_scale.new_tensor(float(multiplier)))
 
 
 class LoRAYuE2Pipeline(YuE2Pipeline):
@@ -60,16 +60,14 @@ class LoRAYuE2Pipeline(YuE2Pipeline):
                 rf = dict(r=hyper["rank"], alpha=hyper["alpha"],
                           dropout=hyper.get("dropout", 0.0))
                 if hyper.get("ar"):
-                    attach_ar_lora(model, **rf)
+                    modules = attach_ar_lora(model, **rf)
                 else:
                     keys = set(load_file(adapter / "lora.safetensors"))
                     include_heads = any(key.split(".")[0] in {"vae2llm", "llm2vae"}
                                        for key in keys)
-                    attach_nar_lora(model, include_heads=include_heads, **rf)
+                    modules = attach_nar_lora(model, include_heads=include_heads, **rf)
                 load_adapter(model, adapter)
-                if is_ar and self.lora_scale is not None:
-                    set_lora_scale(model, self.lora_scale)
-                elif not is_ar and self.lora_nar_scale is not None:
-                    set_lora_scale(model, self.lora_nar_scale)
+                set_lora_scale(modules, self.lora_scale if is_ar
+                               else self.lora_nar_scale)
             self._lora_attached = True
         return model
