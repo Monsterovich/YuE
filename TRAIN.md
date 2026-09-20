@@ -203,7 +203,10 @@ often past ~1.0 on NAR) collapse into harsh noise/artifacts.
 multiplier was applied to *every* LoRA module in the model instead of only the
 adapter's own modules, so the last applied multiplier silently rescaled the
 other stage too. It exists only to replicate pre-fix generations; leave it off
-unless you deliberately want that coupling.
+unless you deliberately want that coupling. That said, the first (pre-fix)
+train + scaling produced strikingly **interesting results** — a strong, raw
+dataset imprint that the honest retrain softens — so the flag is kept as a
+deliberate "old-school" option for anyone chasing that character.
 
 ---
 
