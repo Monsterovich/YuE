@@ -193,6 +193,18 @@ pipe = LoRAYuE2Pipeline.from_pretrained(
 The adapters are attached after low-vram placement, so the base checkpoint
 stays untouched. Swap adapters freely by changing the path.
 
+Effective strength of an adapter is `alpha / r` (baked into a `lora_scale`
+buffer at attach time) times the `lora_scale`/`lora_nar_scale` multiplier.
+Tune the multiplier by ear: low values give a clean but faint imprint of the
+training data, while values that push `alpha / r * multiplier` too high (most
+often past ~1.0 on NAR) collapse into harsh noise/artifacts.
+
+`legacy_scale=True` reproduces the **old, buggy** behaviour where each
+multiplier was applied to *every* LoRA module in the model instead of only the
+adapter's own modules, so the last applied multiplier silently rescaled the
+other stage too. It exists only to replicate pre-fix generations; leave it off
+unless you deliberately want that coupling.
+
 ---
 
 ## Merging (`merge_lora.py`)

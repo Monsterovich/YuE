@@ -18,7 +18,7 @@ from safetensors.torch import load_file
 
 from yue2 import YuE2Pipeline
 
-from lora import (LoRALinear, adapter_hyperparameters, attach_ar_lora,
+from lora import (all_lora_modules, adapter_hyperparameters, attach_ar_lora,
                   attach_nar_lora, load_adapter)
 
 
@@ -38,11 +38,13 @@ def set_lora_scale(modules, multiplier):
 
 class LoRAYuE2Pipeline(YuE2Pipeline):
     def __init__(self, model_dir, vae_dir, *, lora=None, lora_nar=None,
-                 lora_scale=None, lora_nar_scale=None, **kwargs):
+                 lora_scale=None, lora_nar_scale=None, legacy_scale=False,
+                 **kwargs):
         self.lora_adapter = None if lora is None else Path(lora)
         self.lora_nar_adapter = None if lora_nar is None else Path(lora_nar)
         self.lora_scale = None if lora_scale is None else float(lora_scale)
         self.lora_nar_scale = None if lora_nar_scale is None else float(lora_nar_scale)
+        self.legacy_scale = bool(legacy_scale)
         self._lora_attached = lora is None and lora_nar is None
         for adapter in (self.lora_adapter, self.lora_nar_adapter):
             if adapter is not None:
@@ -67,6 +69,8 @@ class LoRAYuE2Pipeline(YuE2Pipeline):
                                        for key in keys)
                     modules = attach_nar_lora(model, include_heads=include_heads, **rf)
                 load_adapter(model, adapter)
+                if self.legacy_scale:
+                    modules = list(all_lora_modules(model))
                 set_lora_scale(modules, self.lora_scale if is_ar
                                else self.lora_nar_scale)
             self._lora_attached = True
